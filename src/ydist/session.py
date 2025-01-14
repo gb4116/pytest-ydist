@@ -54,10 +54,9 @@ class Session:
                 self.handle_events(config, workers, scheduler)
 
             self._pytest_ydist_main_loop(config, workers, scheduler)
-        except Exception as e:
+        finally:
             for worker in workers.values():
                 worker.terminate()
-            raise e
 
         return True
 

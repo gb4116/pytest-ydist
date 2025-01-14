@@ -62,6 +62,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action='store',
         help='Tells the ydist worker proccess its id'
     )
+    group._addoption(
+        '--ydist-stdout-to-console',
+        action='store_true',
+        help='Forward stdout from worker process to console (pytest stdout)'
+    )
+    # Might also want to add --ydist-stdout-to-file="ydist-{worker_id}.log" in the future
 
 
 @pytest.hookimpl

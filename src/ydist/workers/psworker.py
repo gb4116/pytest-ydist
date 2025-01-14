@@ -14,6 +14,7 @@ import socket
 import json
 import warnings
 import importlib
+import concurrent.futures
 
 from ydist.metacommands import WorkerMetaCommand
 from ydist.types import EventSender, MetaCommand, Worker, Event, TestIdx, CommandStatus, Command
@@ -43,9 +44,16 @@ class ProccessWorker(Worker):
         argv = sys.argv.copy()
         argv.extend(['--ydist-worker-addr', worker_socket_addr])
         argv.extend(['--ydist-worker-id', str(self.worker_id)])
-        sub_out = subprocess.DEVNULL
-        # sub_out = None
-        self.worker_ps = self.worker_ps = subprocess.Popen(argv, stdout=sub_out)
+
+        stdout_to_console = config.getvalue('ydist_stdout_to_console')
+        sub_out = subprocess.PIPE if stdout_to_console else subprocess.DEVNULL
+        self.worker_ps = subprocess.Popen(argv, stdout=sub_out)
+        if stdout_to_console:
+            self._read_stdout_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            self._read_stdout_future = self._read_stdout_executor.submit(self._read_stdout)
+        else:
+            self._read_stdout_future = None
+
         self.conn, _ = worker_socket.accept()
 
         self.event_receiver = EventReceiver(config, worker_id, has_events, self.conn)
@@ -74,6 +82,8 @@ class ProccessWorker(Worker):
     def terminate(self):
         self.conn.close()
         self.worker_ps.terminate()
+        if (self._read_stdout_future is not None) and self._read_stdout_future.exception():
+            raise self._read_stdout_future.exception()
 
     def pop_event(self) -> Event | None:
         if len(self.event_receiver.event_queue) > 0:
@@ -125,6 +135,17 @@ class ProccessWorker(Worker):
                     'location': event.location
                 }
                 self.config.hook.pytest_warning_recorded.call_historic(kwargs=warning_recorded_kwargs)
+
+    def _read_stdout(self):
+        """
+        Echo stdout while the subprocess is running
+        """
+        worker_prefix = f'y{self.worker_id}:'
+        while True:
+            if line := self.worker_ps.stdout.readline():
+                print(worker_prefix, line.decode(errors='replace'), end='')
+            if self.worker_ps.poll() is not None:
+                return
 
 
 class EventReceiver(threading.Thread):
